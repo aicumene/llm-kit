@@ -1,0 +1,78 @@
+# llm-kit
+
+A model toolkit: providers behind a privacy-gated router, a task dispatcher with memoization,
+response shaping, per-task token metering and token savers. Python package `llmkit`.
+
+The core rule is the router's invariant: a request whose sensitivity is above `INTERNAL` can never
+reach a cloud-plane provider, and a "trusted" provider is only built on an address inside the
+configured perimeter (`trust.check_model_url`).
+
+## Layout
+
+```
+src/llmkit/
+  base.py            LLMRequest / LLMResponse / LLMMessage, LLMProvider, Plane, DOCUMENT / QUERY
+  classification.py  Sensitivity and the crossing rule (max_crossable, may_cross_to_cloud)
+  errors.py          LLMError / LLMUnavailable / LLMBackendError, transport-error decorators
+  router.py          LLMRouter, PrivacyViolation — the single chokepoint
+  tracing.py         optional span hook (set_span_factory)
+  ollama.py          OllamaProvider
+  openai_compat.py   OpenAICompatProvider for "/v1" addresses (SGLang, vLLM), is_openai_url
+  vllm.py            VLLMProvider, ModelRoutedProvider, SplitTrustedProvider
+  claude_cli.py      ClaudeCliProvider (headless `claude` CLI, cloud plane)
+  cloud.py           AnthropicProvider (cloud plane; needs the `anthropic` extra)
+  config.py          ModelConfig — everything the factory, the host resolver and dispatch read
+  trust.py           check_model_url, DEFAULT_TRUSTED_CIDRS, UntrustedModelHost
+  hosts.py           HostRegistry, InMemoryHostRegistry, resolve, describe / fingerprint / report
+  factory.py         build_router, CloudWrapper
+  refresh.py         RouterHolder, resolved_router, describe_embed_host
+  dispatch.py        plan_for, run — task-kind policy and memoization over the router
+  shape.py           ask / choice / label / obj — getting a parseable answer, mechanism ladders
+  usage.py           UsageRouter — per-run token totals
+  metering.py        Meter, stage, MeteredRouter, UsageRow / UsageSink / InMemoryUsageSink, flush
+  savers/            catalog, count (estimate), passages (whitespace, dedupe, apply_to_chunks)
+tests/               pytest suite, no network, no database
+```
+
+## Install and test
+
+```
+python3 -m venv .venv
+.venv/bin/pip install -e '.[test]'
+.venv/bin/pytest
+```
+
+Runtime dependency: `httpx`. Optional extra `anthropic` for `AnthropicProvider` (imported lazily).
+Test extra: `pytest`, `pytest-asyncio` (`anyio`, used by some tests, comes with `httpx`).
+Python 3.11 or newer.
+
+## Plugging in a deployment
+
+The package has no database, settings system or tracing backend of its own. A deployment supplies
+them through small interfaces:
+
+| Interface | What the deployment provides | In-package default |
+|---|---|---|
+| `config.ModelConfig` | model addresses, models, timeouts, perimeter, cloud options. Any object with the same attribute names works too (e.g. a pydantic settings class). | defaults of the original deployment |
+| `hosts.HostRegistry` (`load()`, `stamp()`) | where the administrator's address override lives (a table row, a file). `load()` may return any object with the fields `ollama_base_url`, `embed_base_url`, `ollama_model_hosts`, `updated_at`, `updated_by`. Every write must move the stamp. | `InMemoryHostRegistry` |
+| `metering.UsageSink` (`record(row)`, `commit()`) | persistence of token usage; `flush(sink, identity=...)` writes one `UsageRow` per (kind, model, plane) bucket and commits. | `InMemoryUsageSink` |
+| `flush(..., identity=callable)` | the author of the spend when it is known only at flush time (e.g. the signed-in user); used only when the meter has no `profile_id`. | none |
+| `tracing.set_span_factory(f)` | `f(name, **attrs)` returning a context manager, e.g. an OpenTelemetry facade. Process-wide. | no-op spans |
+| `factory.build_router(..., wrap_cloud=f)` | `f(default_cloud_or_None)` returns the cloud provider to register — e.g. one that answers some callers with another key and falls back to the default. Not called under air-gap. | none |
+| `RouterHolder(..., build=f)`, `resolved_router(..., build=f)` | the deployment's own router builder (e.g. one that passes `wrap_cloud`). | `factory.build_router` |
+| `savers.apply_to_chunks(..., scope_attr=...)`, `savers.passages.dedupe(..., scope_attr=...)` | the attribute a passage carries its scope in. | `"scope_id"` |
+| `savers.catalog.enabled(..., catalog=...)`, `describe(..., catalog=...)` | the same savers described in the deployment's own words. | `CATALOG` |
+| `shape.LADDERS[name] = (...)` | measured mechanism ladders for the deployment's own tuned models. | base models only |
+| `openai_compat.SCHEMA_NAME` | the schema name the model server logs (read per request). | `"llmkit"` |
+
+## Tests
+
+`pytest` runs 173 tests (168 functions), with no network and no database. Most are the source's own
+tests with neutral test data; tests that needed the product database were re-expressed against the
+in-memory registry and sink where the logic under test moved into this package. The product's
+tests of its admin routes, health tiles, ops monitor, worker wiring, billing ledger and relay stayed
+with the product.
+
+## License
+
+Apache License 2.0; see `LICENSE` and `NOTICE`.
