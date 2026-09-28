@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: "If you use llm-kit, please cite it as below."
+title: "llm-kit: model providers behind a privacy-gated router, task dispatch with memoization, token metering and token savers"
+type: software
+authors:
+  - family-names: Bernadotte
+    given-names: Alexandra
+    affiliation: AICumene
+version: 0.1.0
+date-released: 2026-09-28
+license: Apache-2.0
+repository-code: "https://github.com/aicumene/llm-kit"
+keywords:
+  - large language models
+  - model routing
+  - privacy
+  - local-first
+  - memoization
+  - token metering

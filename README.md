@@ -73,6 +73,62 @@ in-memory registry and sink where the logic under test moved into this package. 
 tests of its admin routes, health tiles, ops monitor, worker wiring, billing ledger and relay stayed
 with the product.
 
+## How llm-kit compares
+
+llm-kit sits next to model gateways, learned routers and response caches. Each centres on a
+different question.
+
+| | centres on | how a request finds its model | reuse of results | sensitive data |
+|---|---|---|---|---|
+| **llm-kit** | where a request is allowed to run, and what it costs | by its sensitivity first: confidential work runs on hosts inside the trusted perimeter, checked by address; then by task kind, local models first | exact memoization of deterministic tasks, keyed by task kind, model, temperature, scope (tenant or project) and the exact messages | an invariant of the router: a confidential request reaches trusted-plane providers only |
+| LiteLLM [7] | one OpenAI-format interface and proxy for many providers | load balancing, fallbacks, cost- and latency-based routing | exact and semantic response caching | guardrail integrations, such as PII masking with Presidio |
+| Portkey AI Gateway [8] | a gateway for production traffic | fallbacks, load balancing, retries, conditional routing | simple and semantic caching | guardrails on requests and responses |
+| RouteLLM [6] | cost at a target quality | a learned router picks a strong or a weak model for each query | — | — |
+| FrugalGPT [5] | cost at a target quality | a cascade of models of rising cost, stopped by a scorer | a completion cache among its techniques | — |
+| GPTCache [9] | reuse of answers to similar questions | — | a semantic cache over embeddings | — |
+
+What llm-kit adds to that picture:
+
+- The sensitivity of the data decides the plane, and the address of a trusted host is checked
+  against a configured perimeter before a provider is built on it.
+- Reuse is exact and scoped: a memoized result is served only for the same task kind, model,
+  temperature, scope and messages, and confidential work is memoized only within a scope, so one
+  tenant's result is never another's.
+- Small local models get a shaping ladder (the model's own answer, then a prefilled reply, then
+  decoding constrained by a JSON schema) that makes their answers parse, so utility steps can run
+  on them while the cloud writes only what needs it.
+- Metering is part of the call path: tokens per stage, model and plane, together with the tokens
+  each saver kept out of the prompt. The saver catalog records where each technique comes from.
+
+llm-kit can run beside a gateway: a deployment keeps its gateway for traffic management and puts
+llm-kit where the decision about sensitive data is made.
+
+## References
+
+1. W. Kwon et al. Efficient Memory Management for Large Language Model Serving with PagedAttention.
+   SOSP 2023. arXiv:2309.06180. (vLLM)
+2. Ollama. https://github.com/ollama/ollama
+3. llama.cpp. https://github.com/ggml-org/llama.cpp
+4. Anthropic. Prompt caching. https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching
+   (the `prompt_cache` saver)
+5. L. Chen, M. Zaharia, J. Zou. FrugalGPT: How to Use Large Language Models While Reducing Cost and
+   Improving Performance. 2023. arXiv:2305.05176.
+6. I. Ong et al. RouteLLM: Learning to Route LLMs with Preference Data. 2024. arXiv:2406.18665.
+7. LiteLLM. https://github.com/BerriAI/litellm
+8. Portkey AI Gateway. https://github.com/Portkey-AI/gateway
+9. GPTCache. https://github.com/zilliztech/GPTCache
+10. NVIDIA, NTU, MIT. SoL-Pi: Scaling Auto-Research Loops for Efficient Agent Harnesses. 2026.
+    https://github.com/NVlabs/SoL-Pi (the `evidence_reducer`, `observation_pack`, `action_fusion`
+    and `context_compact` savers)
+11. Spotify Portal. Introducing Xirp. https://portal.spotify.com/blog/introducing-xirp (model
+    switching by price and performance; the `shape_routing` saver)
+
+## Author
+
+llm-kit is written by Dr. Alexandra Bernadotte and developed under the AICumene name.
+Copyright 2026 Alexandra Bernadotte (see `NOTICE`). To cite it, use `CITATION.cff`
+(GitHub shows it as "Cite this repository").
+
 ## License
 
 Apache License 2.0; see `LICENSE` and `NOTICE`.
